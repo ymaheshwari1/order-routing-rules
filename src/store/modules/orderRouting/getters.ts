@@ -11,7 +11,7 @@ const getters: GetterTree<OrderRoutingState, RootState> = {
     return state.routes
   },
   getRoutingRules(state) {
-    return JSON.parse(JSON.stringify(state.rules))
+    return JSON.parse(JSON.stringify(state.currentRoute["rules"]))
   },
   getCurrentRoutingGroup(state) {
     return JSON.parse(JSON.stringify(state.currentGroup))
@@ -19,14 +19,17 @@ const getters: GetterTree<OrderRoutingState, RootState> = {
   getCurrentOrderRouting(state) {
     return JSON.parse(JSON.stringify(state.currentRoute))
   },
+  getRoutingRuleInformation(state) {
+    return state.rules
+  },
   getCurrentRouteFilters(state) {
-    return state.currentRouteFilters
+    return JSON.parse(JSON.stringify(state.currentRoute["orderFilters"]))
   },
-  getRuleConditions(state) {
-    return JSON.parse(JSON.stringify(state.ruleConditions))
+  getRuleConditions: (state) => (routingRuleId: string) => {
+    return state.rules[routingRuleId].inventoryFilters ? JSON.parse(JSON.stringify(state.rules[routingRuleId].inventoryFilters)) : {}
   },
-  getRuleActions(state) {
-    return JSON.parse(JSON.stringify(state.ruleActions))
+  getRuleActions: (state) => (routingRuleId: string) => {
+    return state.rules[routingRuleId].actions ? JSON.parse(JSON.stringify(state.rules[routingRuleId].actions)) : {}
   }
 }
 

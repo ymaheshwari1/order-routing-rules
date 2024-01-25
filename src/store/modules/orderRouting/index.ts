@@ -4,14 +4,13 @@ import mutations from "./mutations"
 import { Module } from "vuex"
 import OrderRoutingState from "./OrderRoutingState"
 import RootState from "@/store/RootState"
-import { Route } from "@/types"
 
 const orderRoutingModule: Module<OrderRoutingState, RootState> = {
   namespaced: true,
   state: {
     groups: [],
     routes: [],
-    rules: [],
+    rules: {},
     currentGroup: {},
     currentRoute: {},
     currentRouteFilters: {},

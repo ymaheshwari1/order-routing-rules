@@ -32,6 +32,7 @@ import { saveOutline } from "ionicons/icons";
 
 const store = useStore();
 const enums = computed(() => store.getters["util/getEnums"])
+const inventoryRulesInformation = computed(() => store.getters["orderRouting/getRoutingRuleInformation"])
 
 const props = defineProps({
   routingRuleId: {
@@ -66,44 +67,49 @@ onMounted(() => {
 })
 
 function addConditionOption(condition: any) {
-  const isConditionOptionAlreadyApplied = isConditionOptionSelected(condition.enumCode)?.fieldName
+  const isConditionOptionAlreadyApplied = isConditionOptionSelected(condition.enumCode)
   const associatedEnum = enums.value[props.parentEnumId][associatedOptions[condition.enumId]]
 
   if(isConditionOptionAlreadyApplied) {
-    delete inventoryRuleConditions.value[props.conditionTypeEnumId][condition.enumCode]
-    // When removing a condition, also remove its associated option if available
-    associatedEnum && delete inventoryRuleConditions.value[props.conditionTypeEnumId][associatedEnum.enumCode]
+    if(inventoryRulesInformation.value[props.routingRuleId]["inventoryFilters"]?.[props.conditionTypeEnumId]?.[condition.enumCode]) {
+      inventoryRuleConditions.value[props.conditionTypeEnumId][condition.enumCode]["method"] = "DELETE"
+      // When removing a condition, also remove its associated option if available
+      associatedEnum && (inventoryRuleConditions.value[props.conditionTypeEnumId][associatedEnum.enumCode]["method"] = "DELETE")
+    } else {
+      delete inventoryRuleConditions.value[props.conditionTypeEnumId][condition.enumCode]
+      associatedEnum && delete inventoryRuleConditions.value[props.conditionTypeEnumId][associatedEnum.enumCode]
+    }
   } else {
     // checking unchecking an option and then checking it again, we need to use the same values
-    if(props.ruleConditions[props.conditionTypeEnumId]?.[condition.enumCode]) {
-      inventoryRuleConditions.value[props.conditionTypeEnumId][condition.enumCode] = props.ruleConditions[props.conditionTypeEnumId][condition.enumCode]
-      associatedEnum && (inventoryRuleConditions.value[props.conditionTypeEnumId][associatedEnum.enumCode] = props.ruleConditions[props.conditionTypeEnumId][associatedEnum.enumCode])
+    if(inventoryRulesInformation.value[props.routingRuleId]["inventoryFilters"]?.[props.conditionTypeEnumId]?.[condition.enumCode]) {
+      inventoryRuleConditions.value[props.conditionTypeEnumId][condition.enumCode] = inventoryRulesInformation.value[props.routingRuleId]["inventoryFilters"][props.conditionTypeEnumId][condition.enumCode]
+      associatedEnum && (inventoryRuleConditions.value[props.conditionTypeEnumId][associatedEnum.enumCode] = inventoryRulesInformation.value[props.routingRuleId]["inventoryFilters"][props.conditionTypeEnumId][associatedEnum.enumCode])
     } else {
       // when adding a new value, we don't need to pass conditionSeqId
       // Added check that whether the filters for the conditionType exists or not, if not then create a new value for conditionType
       inventoryRuleConditions.value[props.conditionTypeEnumId] ? inventoryRuleConditions.value[props.conditionTypeEnumId][condition.enumCode] = {
-        routingRuleId: props.routingRuleId,
         conditionTypeEnumId: props.conditionTypeEnumId,
         fieldName: condition.enumCode,
         sequenceNum: Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId]).length && inventoryRuleConditions.value[props.conditionTypeEnumId][Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId])[Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId]).length - 1]]?.sequenceNum >= 0 ? inventoryRuleConditions.value[props.conditionTypeEnumId][Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId])[Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId]).length - 1]].sequenceNum + 5 : 0,  // added check for `>= 0` as sequenceNum can be 0 which will result in again setting the new seqNum to 0
+        method: "CREATE"
       } : inventoryRuleConditions.value = {
         ...inventoryRuleConditions.value,
         [props.conditionTypeEnumId]: {
           [condition.enumCode]: {
-            routingRuleId: props.routingRuleId,
             conditionTypeEnumId: props.conditionTypeEnumId,
             fieldName: condition.enumCode,
-            sequenceNum: 0
+            sequenceNum: 0,
+            method: "CREATE"
           }
         }
       }
 
       // Adding associatedEnum out of ternary, as we will always get the conditionTypeEnumId, as the filter will already handle that
       associatedEnum && (inventoryRuleConditions.value[props.conditionTypeEnumId][associatedEnum.enumCode] = {
-        routingRuleId: props.routingRuleId,
         conditionTypeEnumId: props.conditionTypeEnumId,
         fieldName: associatedEnum.enumCode,
         sequenceNum: Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId]).length && inventoryRuleConditions.value[props.conditionTypeEnumId][Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId])[Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId]).length - 1]]?.sequenceNum >= 0 ? inventoryRuleConditions.value[props.conditionTypeEnumId][Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId])[Object.keys(inventoryRuleConditions.value[props.conditionTypeEnumId]).length - 1]].sequenceNum + 5 : 0,  // added check for `>= 0` as sequenceNum can be 0 which will result in again setting the new seqNum to 0
+        method: "CREATE"
       })
     }
   }
@@ -114,7 +120,13 @@ function saveConditionOptions() {
 }
 
 function isConditionOptionSelected(code: string) {
-  return inventoryRuleConditions.value[props.conditionTypeEnumId]?.[code]
+  if(inventoryRuleConditions.value[props.conditionTypeEnumId]?.[code]) {
+    if(inventoryRuleConditions.value[props.conditionTypeEnumId]?.[code]?.method && inventoryRuleConditions.value[props.conditionTypeEnumId]?.[code]?.method === 'DELETE') {
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 function closeModal(filters = {}, action = 'close') {

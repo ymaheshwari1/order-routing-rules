@@ -194,20 +194,34 @@ const actions: ActionTree<OrderRoutingState, RootState> = {
     return orderRoutingId;
   },
 
-  async fetchCurrentOrderRouting({ dispatch, state }, orderRoutingId) {
-    const current = state.currentRoute
-    if(current.orderRoutingId && current.orderRoutingId === orderRoutingId) {
-      dispatch("setCurrentOrderRouting", current)
-      return;
-    }
-
-    let currentRoute = {}
+  async fetchCurrentOrderRouting({ dispatch }, orderRoutingId) {
+    let currentRoute = {} as any
 
     try {
-      const resp = await OrderRoutingService.fetchOrderRouting(orderRoutingId);
+      const resp = await OrderRoutingService.fetchOrderRoutingInformation(orderRoutingId);
 
-      if(!hasError(resp) && resp.data) {
+      if(!hasError(resp) && resp.data.orderRoutingId) {
         currentRoute = resp.data
+
+        // Check and update the structure of orderFilters to use in app
+        if(resp.data.orderFilters?.length) {
+          // sorting the filters as per the seqNum
+          resp.data.orderFilters = sortSequence(resp.data.orderFilters)
+          currentRoute["orderFilters"] = resp.data.orderFilters.reduce((filters: any, filter: RouteFilter) => {
+            if(filters[filter.conditionTypeEnumId]) {
+              filters[filter.conditionTypeEnumId][filter.fieldName] = filter
+            } else {
+              filters[filter.conditionTypeEnumId] = {
+                [filter.fieldName]: filter
+              }
+            }
+            return filters
+          }, {})
+        }
+
+        if(resp.data.rules?.length) {
+          currentRoute["rules"] = sortSequence(resp.data.rules)
+        }
       } else {
         throw resp.data
       }
@@ -249,7 +263,8 @@ const actions: ActionTree<OrderRoutingState, RootState> = {
   },
 
   async createRoutingRule({ commit, state }, payload) {
-    let routingRules = JSON.parse(JSON.stringify(state.rules))
+    const currentRoute = JSON.parse(JSON.stringify(state.currentRoute))
+    let routingRules = currentRoute.rules
     let routingRuleId = ''
 
     try {
@@ -262,14 +277,14 @@ const actions: ActionTree<OrderRoutingState, RootState> = {
           ...payload,
           routingRuleId
         })
-        showToast('New Inventory Rule Created')
+        showToast('New inventory rule created')
 
         // Sort the routings and update the state only on success
         if(routingRules.length) {
           routingRules = sortSequence(routingRules)
         }
 
-        commit(types.ORDER_ROUTINGS_UPDATED, routingRules)
+        commit(types.ORDER_ROUTING_CURRENT_ROUTE_UPDATED, currentRoute)
       }
     } catch(err) {
       showToast("Failed to create rule")
@@ -466,6 +481,63 @@ const actions: ActionTree<OrderRoutingState, RootState> = {
     commit(types.ORDER_ROUTING_RULE_ACTIONS_UPDATED, ruleActions)
   },
 
+  async fetchInventoryRuleInformation({ commit, state }, routingRuleId) {
+    const rulesInformation = JSON.parse(JSON.stringify(state.rules))
+
+    // Do not fetch the rule information if its already available in state. This condition will be false on refresh as state will be cleared so automatically updated information will be fetched
+    if(rulesInformation[routingRuleId]) {
+      return;
+    }
+
+    try {
+      const resp = await OrderRoutingService.fetchInventoryRuleInformation(routingRuleId)
+
+      if(!hasError(resp) && resp.data.routingRuleId) {
+        rulesInformation[routingRuleId] = {}
+
+        if(resp.data.inventoryFilters?.length) {
+          rulesInformation[routingRuleId]["inventoryFilters"] = resp.data.inventoryFilters.reduce((conditions: any, condition: any) => {
+            if(conditions[condition.conditionTypeEnumId]) {
+              conditions[condition.conditionTypeEnumId][condition.fieldName] = condition
+            } else {
+              conditions[condition.conditionTypeEnumId] = {
+                [condition.fieldName]: condition
+              }
+            }
+            return conditions
+          }, {})
+
+          const sortEnum = "ENTCT_SORT_BY"
+
+          // As we only need to add support of reordering for sortBy filter
+          if(rulesInformation[routingRuleId]["inventoryFilters"][sortEnum]?.length) {
+            rulesInformation[routingRuleId]["inventoryFilters"][sortEnum] = sortSequence(rulesInformation[routingRuleId]["inventoryFilters"][sortEnum])
+          }
+        }
+
+        if(resp.data.actions?.length) {
+          rulesInformation[routingRuleId]["actions"] = resp.data.actions.reduce((actions: any, action: any) => {
+            // considering that only one value for an action is available
+            actions[action.actionTypeEnumId] = action
+            return actions
+          }, {})
+        }
+      }
+    } catch(err) {
+      logger.error(err)
+    }
+
+    commit(types.ORDER_ROUTING_RULES_UPDATED, rulesInformation)
+    return rulesInformation[routingRuleId]
+  },
+
+  async updateOrderRoutingInformation({ dispatch }, payload) {
+    try {
+      await OrderRoutingService.updateOrderRoutingInformation(payload)
+    } catch(err) {
+      logger.error(err)
+    } 
+  }
 }
 
 export default actions;

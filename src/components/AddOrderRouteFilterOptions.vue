@@ -32,6 +32,7 @@ import { saveOutline } from "ionicons/icons";
 
 const store = useStore();
 const enums = computed(() => store.getters["util/getEnums"])
+const currentRouting = computed(() => store.getters["orderRouting/getCurrentOrderRouting"])
 
 const props = defineProps({
   orderRoutingId: {
@@ -55,36 +56,42 @@ const props = defineProps({
   }
 })
 let routingFilters = ref({}) as any
+let filters = ref({}) as any
 
 onMounted(() => {
   routingFilters.value = props.orderRoutingFilters ? JSON.parse(JSON.stringify(props.orderRoutingFilters)) : {}
+  filters.value = JSON.parse(JSON.stringify(currentRouting.value["orderFilters"]))
 })
 
 function addSortOption(sort: any) {
-  const isSortOptionAlreadyApplied = isSortOptionSelected(sort.enumCode)?.fieldName
+  const isSortOptionAlreadyApplied = isSortOptionSelected(sort.enumCode)
 
   if(isSortOptionAlreadyApplied) {
-    delete routingFilters.value[props.conditionTypeEnumId][sort.enumCode]
+    if(filters.value[props.conditionTypeEnumId]?.[sort.enumCode]) {
+      routingFilters.value[props.conditionTypeEnumId][sort.enumCode]["method"] = "DELETE"
+    } else {
+      delete routingFilters.value[props.conditionTypeEnumId][sort.enumCode]
+    }
   } else {
     // checking unchecking an option and then checking it again, we need to use the same values
-    if(props.orderRoutingFilters[props.conditionTypeEnumId]?.[sort.enumCode]) {
-      routingFilters.value[props.conditionTypeEnumId][sort.enumCode] = props.orderRoutingFilters[props.conditionTypeEnumId][sort.enumCode]
+    if(filters.value[props.conditionTypeEnumId]?.[sort.enumCode]) {
+      routingFilters.value[props.conditionTypeEnumId][sort.enumCode] = filters.value[props.conditionTypeEnumId]?.[sort.enumCode]
     } else {
       // when adding a new value, we don't need to pass conditionSeqId
       // Added check that whether the filters for the conditionType exists or not, if not then create a new value for conditionType
       routingFilters.value[props.conditionTypeEnumId] ? routingFilters.value[props.conditionTypeEnumId][sort.enumCode] = {
-        orderRoutingId: props.orderRoutingId,
         conditionTypeEnumId: props.conditionTypeEnumId,
         fieldName: sort.enumCode,
         sequenceNum: Object.keys(routingFilters.value[props.conditionTypeEnumId]).length && routingFilters.value[props.conditionTypeEnumId][Object.keys(routingFilters.value[props.conditionTypeEnumId])[Object.keys(routingFilters.value[props.conditionTypeEnumId]).length - 1]]?.sequenceNum >= 0 ? routingFilters.value[props.conditionTypeEnumId][Object.keys(routingFilters.value[props.conditionTypeEnumId])[Object.keys(routingFilters.value[props.conditionTypeEnumId]).length - 1]].sequenceNum + 5 : 0,  // added check for `>= 0` as sequenceNum can be 0 which will result in again setting the new seqNum to 0
+        method: "CREATE",
       } : routingFilters.value = {
         ...routingFilters.value,
         [props.conditionTypeEnumId]: {
           [sort.enumCode]: {
-            orderRoutingId: props.orderRoutingId,
             conditionTypeEnumId: props.conditionTypeEnumId,
             fieldName: sort.enumCode,
-            sequenceNum: 0
+            sequenceNum: 0,
+            method: "CREATE"
           }
         }
       }
@@ -97,7 +104,13 @@ function saveSortOptions() {
 }
 
 function isSortOptionSelected(code: string) {
-  return routingFilters.value[props.conditionTypeEnumId]?.[code]
+  if(routingFilters.value[props.conditionTypeEnumId]?.[code]) {
+    if(routingFilters.value[props.conditionTypeEnumId]?.[code]?.method && routingFilters.value[props.conditionTypeEnumId]?.[code]?.method === 'DELETE') {
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 function closeModal(filters = {}, action = 'close') {
