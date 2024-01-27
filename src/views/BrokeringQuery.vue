@@ -260,7 +260,7 @@ const getOrderSortOptions = computed(() => {
 onIonViewWillEnter(async () => {
   await Promise.all([store.dispatch("orderRouting/fetchCurrentOrderRouting", props.orderRoutingId), store.dispatch("util/fetchFacilities"), store.dispatch("util/fetchEnums", { enumTypeId: "ORDER_SALES_CHANNEL" }), store.dispatch("util/fetchShippingMethods"), store.dispatch("util/fetchFacilityGroups")])
 
-  orderRoutingFilters.value = JSON.parse(JSON.stringify(currentRouting.value["orderFilters"]))
+  orderRoutingFilters.value = currentRouting.value["orderFilters"] ? JSON.parse(JSON.stringify(currentRouting.value["orderFilters"])) : {}
 
   // Added check to not fetch any rule related information as when a new route will be created no rule will be available thus no need to fetch any other information
   if(!currentRouting.value["rules"].length) {
@@ -287,7 +287,7 @@ async function fetchRuleInformation(routingRuleId: string) {
     rulesInformation.value[routingRuleId] = await store.dispatch("orderRouting/fetchInventoryRuleInformation", routingRuleId)
   }
 
-  // If there is not an already selected rule, deep clone it for usage
+  // If there is not an already selected rule, deep clone it for usage. This condition can occur when we does not have any inventory rules for the route and we have created a new rule
   if(!selectedRoutingRule.value.routingRuleId) {
     rulesInformation.value = JSON.parse(JSON.stringify(inventoryRulesInformation.value))
   }
@@ -312,7 +312,7 @@ function updateRuleInformation() {
 
 async function addInventoryFilterOptions(parentEnumId: string, conditionTypeEnumId: string, label = "") {
   if(!selectedRoutingRule.value.routingRuleId) {
-    // TODO: check if we can show a toast here
+    showToast('Failed to identify selected inventory rule, please select a rule or refresh')
     logger.error('Failed to identify selected inventory rule, please select a rule or refresh')
     return;
   }
@@ -378,7 +378,7 @@ async function addInventoryRule() {
         statusId: "RULE_DRAFT", // by default considering the rule to be in draft
         sequenceNum: inventoryRules.value.length && inventoryRules.value[inventoryRules.value.length - 1].sequenceNum >= 0 ? inventoryRules.value[inventoryRules.value.length - 1].sequenceNum + 5 : 0,  // added check for `>= 0` as sequenceNum can be 0, that will result in again setting the new route seqNum to 0,
         assignmentEnumId: "ORA_SINGLE", // by default, considering partial fulfillment to be inactive
-        fulfillEntireShipGroup: "N",  // TODO: check for default value
+        createdDate: DateTime.now().toMillis()
       }
 
       const routingRuleId = await store.dispatch("orderRouting/createRoutingRule", payload)
@@ -496,9 +496,6 @@ function updateClearAutoCancelDays(checked: any) {
   }
 
   updateRuleInformation()
-
-  selectedRoutingRule.value.assignmentEnumId = checked ? "ORA_MULTI" : "ORA_SINGLE"
-  updateInventoryRules()
 }
 
 function getFilterValue(options: any, enums: any, parameter: string) {
@@ -527,7 +524,7 @@ async function selectPromiseFilterValue(ev: CustomEvent) {
   popover.onDidDismiss().then((result: any) => {
     getFilterValue(orderRoutingFilters.value, ruleEnums, "PROMISE_DATE").fieldValue = result.data?.isPastDuration ? `-${result.data?.duration}` : result.data?.duration
     getFilterValue(orderRoutingFilters.value, ruleEnums, "PROMISE_DATE").operator = "less-equals"
-    getFilterValue(orderRoutingFilters.value, ruleEnums, "PROMISE_DATE").method = "UPDATE"
+    getFilterValue(orderRoutingFilters.value, ruleEnums, "PROMISE_DATE").method = currentRouting.value["orderFilters"]?.["ENTCT_FILTER"]?.[ruleEnums["PROMISE_DATE"].code] ? "UPDATE" : "CREATE"
   })
 
   return popover.present();
@@ -554,7 +551,7 @@ async function selectValue(id: string, header: string) {
     // Considering that when having role in result, its negative action and not need to do anything
     if(!result.role && value) {
       getFilterValue(inventoryRuleConditions.value, conditionFilterEnums, id).fieldValue = value
-      // When selecting a filter value making the operator to default `equals`
+      // When selecting a filter value making the operator value to `equals` which is the default value
       getFilterValue(inventoryRuleConditions.value, conditionFilterEnums, id).operator = "equals"
       getFilterValue(inventoryRuleConditions.value, conditionFilterEnums, id).method = "UPDATE"
       updateRuleInformation()
@@ -572,7 +569,7 @@ function updateOperator(event: CustomEvent) {
 
 function updateOrderFilterValue(event: CustomEvent, conditionTypeEnumId: string, id: string) {
   orderRoutingFilters.value[conditionTypeEnumId][ruleEnums[id].code].fieldValue = event.detail.value
-  orderRoutingFilters.value[conditionTypeEnumId][ruleEnums[id].code].method = currentRouting.value["orderFilters"]?.["conditionTypeEnumId"]?.[ruleEnums[id].code] ? "UPDATE" : "CREATE"
+  orderRoutingFilters.value[conditionTypeEnumId][ruleEnums[id].code].method = currentRouting.value["orderFilters"]?.[conditionTypeEnumId]?.[ruleEnums[id].code] ? "UPDATE" : "CREATE"
 }
 
 function updateRuleFilterValue(event: CustomEvent, conditionTypeEnumId: string, id: string) {
@@ -581,6 +578,7 @@ function updateRuleFilterValue(event: CustomEvent, conditionTypeEnumId: string, 
   updateRuleInformation()
 }
 
+// Updates the inventoryRules array when there are any changes in the currently selected rule
 function updateInventoryRules() {
   inventoryRules.value.map((rule: Rule) => {
     if(rule.routingRuleId === selectedRoutingRule.value.routingRuleId) {
@@ -614,7 +612,7 @@ function doRouteSortReorder(event: CustomEvent) {
   }, {})
 
   Object.keys(orderRoutingFilters.value["ENTCT_SORT_BY"]).map((key: string) => {
-    const isSeqChanged = currentRouting.value["orderFilters"]["ENTCT_SORT_BY"][key] ? isObjectUpdated(currentRouting.value["orderFilters"]["ENTCT_SORT_BY"][key], orderRoutingFilters.value["ENTCT_SORT_BY"]?.[key]) : false
+    const isSeqChanged = currentRouting.value["orderFilters"]["ENTCT_SORT_BY"][key] ? isObjectUpdated(JSON.parse(JSON.stringify(currentRouting.value["orderFilters"]))["ENTCT_SORT_BY"][key], orderRoutingFilters.value["ENTCT_SORT_BY"]?.[key]) : false
     if(isSeqChanged) {
       orderRoutingFilters.value["ENTCT_SORT_BY"][key].method = "UPDATE"
     } else if(currentRouting.value["orderFilters"]["ENTCT_SORT_BY"][key]) {
@@ -667,6 +665,7 @@ function doReorder(event: CustomEvent) {
   // returns the updated sequence after reordering
   const updatedSeq = event.detail.complete(JSON.parse(JSON.stringify(inventoryRules.value)));
   inventoryRules.value = updatedSeq
+  // Not updating the sequenceNum for the updated rules, as the reordering of rules can happen multiple times without saving, hence updating the rules sequenceNum only on saving
 }
 
 // checks whether values for all the properties of two objects are same
@@ -690,6 +689,7 @@ async function save() {
     routingGroupId: currentRouting.value["routingGroupId"],
   } as any
 
+  // Find diff for inventory rules
   let diffSeq = findRoutingsDiff(currentRouting.value["rules"], inventoryRules.value)
 
   const updatedSeqenceNum = currentRouting.value["rules"].map((rule: Rule) => rule.sequenceNum)
@@ -702,18 +702,25 @@ async function save() {
   if(diffSeq.length) {
     routing["rules"] = diffSeq
   }
+  // Inventory rules diff calculated
 
+  // Prepare routeFilter to update, delete and create
   conditionTypes.map((filterType: string) => {
     if(orderRoutingFilters.value[filterType]) {
       Object.keys(orderRoutingFilters.value[filterType]).map((key: string) => {
+        console.log('orderRoutingFilters.value[filterType][key]', orderRoutingFilters.value[filterType][key])
+        // When there is no change in filter, method property won't exist and thus do not do anything
         if(!orderRoutingFilters.value[filterType][key]?.method) {
           return;
         }
 
+        // If method property is DELETE then remove, then add the filter to removes array
         if(orderRoutingFilters.value[filterType][key]["method"] === "DELETE") {
-          filtersToRemove.push(currentRouting.value["orderFilters"][filterType][key])
+          filtersToRemove.push(JSON.parse(JSON.stringify(currentRouting.value["orderFilters"]))[filterType][key])
         } else {
           const method = orderRoutingFilters.value[filterType][key]["method"]
+
+          // prepare routeFilter values by removing some of the properties those we don't need to send in the update request
           const routeFilter = Object.keys(orderRoutingFilters.value[filterType][key]).reduce((filter: any, param: string) => {
             if(fieldToRemoveBeforeUpdate.includes(param)) {
               return filter;
@@ -727,8 +734,8 @@ async function save() {
             routeFilter["createdDate"] = DateTime.now().toMillis()
           }
 
-          // Not include the filter in update when fieldValue is missing for specific type
-          if(filterType === valueRequiredForRouteFilter && !routeFilter.fieldValue) {
+          // Not include the filter in update when fieldValue is missing for specific type of filter `ENTCT_FILTER`, added check for 0 as we have some filters in which user can pass 0 as its value
+          if(filterType === valueRequiredForRouteFilter && !(routeFilter.fieldValue || routeFilter.fieldValue === 0)) {
             return;
           }
 
@@ -741,6 +748,7 @@ async function save() {
       })
     }
   })
+  // Route filters array prepared
 
   const conditionsToRemove = [] as any
 
@@ -776,11 +784,18 @@ async function save() {
   //   }
   // })
 
-  if(filtersToRemove.length) {
-    await store.dispatch("orderRouting/deleteRoutingFilters", { filters: filtersToRemove, orderRoutingId: props.orderRoutingId })
-  }
+  // If there are some filters those needs to be removed then only call the delete api
+  // if(filtersToRemove.length) {
+  //   await store.dispatch("orderRouting/deleteRoutingFilters", { filters: filtersToRemove, orderRoutingId: props.orderRoutingId })
+  // }
 
-  await store.dispatch("orderRouting/updateOrderRoutingInformation", routing)
+  console.log('filtersToRemove', filtersToRemove)
+  console.log('routing', routing)
+
+  // Call update api only when there is some change in the rules or orderFilters array
+  // if(routing["rules"]?.length || routing["orderFilters"].length) {
+  //   await store.dispatch("orderRouting/updateOrderRoutingInformation", routing)
+  // }
 
   // if(conditionsToRemove.length) {
   //   await store.dispatch("orderRouting/deleteRuleConditions", { conditions: conditionsToRemove, routingRuleId: selectedRoutingRule.value.routingRuleId })

@@ -185,7 +185,7 @@ const actions: ActionTree<OrderRoutingState, RootState> = {
 
   async createRoutingRule({ commit, state }, payload) {
     const currentRoute = JSON.parse(JSON.stringify(state.currentRoute))
-    let routingRules = currentRoute.rules
+    let routingRules = currentRoute.rules.length ? currentRoute.rules : []
     let routingRuleId = ''
 
     try {
