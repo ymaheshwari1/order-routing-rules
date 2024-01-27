@@ -1,14 +1,10 @@
 import { GetterTree } from "vuex"
 import OrderRoutingState from "./OrderRoutingState"
 import RootState from "@/store/RootState"
-import { Group, Route } from "@/types"
 
 const getters: GetterTree<OrderRoutingState, RootState> = {
   getRoutingGroups(state) {
     return state.groups
-  },
-  getOrderRoutings(state) {
-    return state.routes
   },
   getRoutingRules(state) {
     return JSON.parse(JSON.stringify(state.currentRoute["rules"]))

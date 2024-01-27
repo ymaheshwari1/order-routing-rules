@@ -1,6 +1,4 @@
 import api from "@/api"
-import logger from "@/logger";
-import { hasError, showToast } from "@/utils";
 
 const fetchRoutingGroups = async (payload: any): Promise<any> => {
   return api({
@@ -10,7 +8,7 @@ const fetchRoutingGroups = async (payload: any): Promise<any> => {
   });
 }
 
-const fetchRoutingGroup = async (routingGroupId: string): Promise<any> => {
+const fetchRoutingGroupInformation = async (routingGroupId: string): Promise<any> => {
   return api({
     url: `groups/${routingGroupId}`,
     method: "GET"
@@ -31,14 +29,6 @@ const updateRoutingGroup = async (payload: any): Promise<any> => {
     method: "POST",
     data: payload
   })
-}
-
-const fetchOrderRoutings = async (payload: any): Promise<any> => {
-  return api({
-    url: `groups/${payload.routingGroupId}/routings`,
-    method: "GET",
-    query: payload
-  });
 }
 
 const fetchOrderRouting = async (orderRoutingId: string): Promise<any> => {
@@ -158,6 +148,14 @@ const fetchRuleActions = async (payload: any): Promise<any> => {
   });
 }
 
+const scheduleBrokering = async (payload: any): Promise<any> => {
+  return api({
+    url: `groups/${payload.routingGroupId}/schedule`,
+    method: "POST",
+    data: payload
+  });
+}
+
 export const OrderRoutingService = {
   createOrderRouting,
   createRoutingGroup,
@@ -167,14 +165,14 @@ export const OrderRoutingService = {
   deleteRuleCondition,
   fetchInventoryRuleInformation,
   fetchOrderRouting,
-  fetchOrderRoutings,
   fetchRoutingFilters,
-  fetchRoutingGroup,
+  fetchRoutingGroupInformation,
   fetchRoutingGroups,
   fetchOrderRoutingInformation,
   fetchRoutingRules,
   fetchRuleActions,
   fetchRuleConditions,
+  scheduleBrokering,
   updateOrderRouting,
   updateOrderRoutingInformation,
   updateRoutingFilter,

@@ -72,27 +72,31 @@
                 </ion-card-title>
               </ion-card-header>
               <ion-item>
-                <ion-icon slot="start" :icon="timeOutline"/>
-                <ion-label>{{ "Run time" }}</ion-label>
-                <!-- <ion-label slot="end">{{ currentRoutingGroup.runTime || "-" }}</ion-label> -->
-              </ion-item>
-              <ion-item>
                 <ion-icon slot="start" :icon="timerOutline"/>
-                <ion-label>{{ "Schedule" }}</ion-label>
-                <!-- <ion-label slot="end">{{ currentRoutingGroup.frequency || "-" }}</ion-label> -->
+                <ion-select label="Schedule" interface="popover" :placeholder="$t('Select')" :value="job.cronExpression" @ionChange="updateCronExpression($event)">
+                  <ion-select-option v-for="(expression, description) in cronExpressions" :key="expression" :value="expression">{{ description }}</ion-select-option>
+                </ion-select>
               </ion-item>
             </ion-card>
+            <div class="actions desktop-only">
+              <div>
+                <ion-button size="small" fill="outline" color="danger" @click="disable">{{ "Disable" }}</ion-button>
+              </div>
+              <div>
+                <ion-button size="small" fill="outline" @click="saveChanges()">{{ "Save changes" }}</ion-button>
+              </div>
+            </div>
             <ion-item>
-              {{ `Created at ${currentRoutingGroup.createdDate || "-"}` }}
+              {{ `Created at ${getTime(currentRoutingGroup.createdDate)}` }}
             </ion-item>
             <ion-item>
-              {{ `Updated at ${currentRoutingGroup.lastUpdatedStamp || "-"}` }}
+              {{ `Updated at ${getTime(currentRoutingGroup.lastUpdatedStamp)}` }}
             </ion-item>
           </aside>
         </section>
       </div>
       <ion-fab vertical="bottom" horizontal="end" slot="fixed">
-        <ion-fab-button :disabled="!routingsToUpdate.length">
+        <ion-fab-button :disabled="!hasUnsavedChanges" @click="saveRoutingGroup">
           <ion-icon :icon="saveOutline" />
         </ion-fab-button>
       </ion-fab>
@@ -101,14 +105,17 @@
 </template>
 
 <script setup lang="ts">
-import { IonBackButton, IonBadge, IonButtons, IonButton, IonCard, IonCardHeader, IonCardTitle, IonChip, IonContent, IonFab, IonFabButton, IonHeader, IonIcon, IonItem, IonLabel, IonList, IonListHeader, IonPage, IonReorder, IonReorderGroup, IonTextarea, IonTitle, IonToolbar, alertController, modalController, onIonViewWillEnter, onIonViewWillLeave } from "@ionic/vue";
-import { addCircleOutline, archiveOutline, reorderTwoOutline, saveOutline, timeOutline, timerOutline } from "ionicons/icons"
-import { useRouter } from "vue-router";
+import { IonBackButton, IonBadge, IonButtons, IonButton, IonCard, IonCardHeader, IonCardTitle, IonChip, IonContent, IonFab, IonFabButton, IonHeader, IonIcon, IonItem, IonLabel, IonList, IonListHeader, IonPage, IonReorder, IonReorderGroup, IonSelect, IonSelectOption, IonTextarea, IonTitle, IonToolbar, alertController, modalController, onIonViewWillEnter, onIonViewWillLeave } from "@ionic/vue";
+import { addCircleOutline, archiveOutline, reorderTwoOutline, saveOutline, timerOutline } from "ionicons/icons"
+import { onBeforeRouteLeave, useRouter } from "vue-router";
 import { useStore } from "vuex";
-import { computed, defineProps, onMounted, ref } from "vue";
+import { computed, defineProps, ref } from "vue";
 import { Group, Route } from "@/types";
 import ArchivedRoutingModal from "@/components/ArchivedRoutingModal.vue"
-import emitter from "@/event-bus";
+import { OrderRoutingService } from "@/services/RoutingService";
+import logger from "@/logger";
+import { DateTime } from "luxon";
+import { hasError, getTime, showToast, sortSequence } from "@/utils";
 
 const router = useRouter();
 const store = useStore();
@@ -120,31 +127,103 @@ const props = defineProps({
 })
 
 const routingStatus = JSON.parse(process.env?.VUE_APP_ROUTE_STATUS_ENUMS as string)
-let routingsToUpdate = ref([])
-let initialRoutingsOrder = ref([])
+const cronExpressions = JSON.parse(process.env?.VUE_APP_CRON_EXPRESSIONS as string)
 let routingsForReorder = ref([])
-let description = ref('')
+let description = ref("")
 let isDescUpdating = ref(false)
+let hasUnsavedChanges = ref(false)
 
-const currentRoutingGroup = computed((): Group => store.getters["orderRouting/getCurrentRoutingGroup"])
-const orderRoutings = computed(() => store.getters["orderRouting/getOrderRoutings"])
+let job = ref({}) as any
+let orderRoutings = ref([]) as any
+
+const currentRoutingGroup: any = computed((): Group => store.getters["orderRouting/getCurrentRoutingGroup"])
+const currentEComStore = computed(() => store.getters["user/getCurrentEComStore"])
 
 onIonViewWillEnter(async () => {
-  await Promise.all([store.dispatch("orderRouting/fetchOrderRoutings", props.routingGroupId), store.dispatch("orderRouting/fetchCurrentRoutingGroup", props.routingGroupId)])
+  await store.dispatch("orderRouting/fetchCurrentRoutingGroup", props.routingGroupId)
 
-  initializeOrderRoutings();
-
-  description.value = currentRoutingGroup.value.description ? currentRoutingGroup.value.description : "No description available"
-  emitter.on("initializeOrderRoutings", initializeOrderRoutings)
+  job.value = currentRoutingGroup.value["schedule"] ? JSON.parse(JSON.stringify(currentRoutingGroup.value))["schedule"] : {}
+  orderRoutings.value = currentRoutingGroup.value["routings"] ? JSON.parse(JSON.stringify(currentRoutingGroup.value))["routings"] : []
+  description.value = currentRoutingGroup.value["description"] ? currentRoutingGroup.value["description"] : ""
+  
+  if(orderRoutings.value.length) {
+    initializeOrderRoutings();
+  }
 })
 
-onIonViewWillLeave(() => {
-  emitter.off("initializeOrderRoutings", initializeOrderRoutings)
+onBeforeRouteLeave(async (to) => {
+  if(to.path === '/login') return;
+  let canLeave = false;
+
+  const alert = await alertController.create({
+    header: "Leave page",
+    message: "Any edits made on this page will be lost.",
+    buttons: [
+      {
+        text: "STAY",
+        handler: () => {
+          canLeave = false;
+        },
+      },
+      {
+        text: "LEAVE",
+        handler: () => {
+          canLeave = true;
+        },
+      },
+    ],
+  });
+
+  if(hasUnsavedChanges.value) {
+    alert.present();
+    await alert.onDidDismiss();
+    return canLeave;
+  }
 })
+
+function updateCronExpression(event: CustomEvent) {
+  job.value.cronExpression = event.detail.value
+}
 
 function initializeOrderRoutings() {
-  initialRoutingsOrder.value = JSON.parse(JSON.stringify(getActiveAndDraftOrderRoutings()))
   routingsForReorder.value = JSON.parse(JSON.stringify(getActiveAndDraftOrderRoutings()))
+}
+
+async function saveChanges() {
+  if(!job.value.cronExpression) {
+    logger.error('Please select an expression before proceeding')
+  }
+
+  const payload = {
+    routingGroupId: props.routingGroupId,
+    paused: "N",  // considering job in active status as soon as scheduled
+    ...job.value
+  }
+
+  try {
+    const resp = await OrderRoutingService.scheduleBrokering(payload)
+    if(!hasError(resp)){
+      showToast("Job updated")
+    }
+  } catch(err) {
+    logger.error(err)
+  }
+}
+
+async function disable() {
+  const payload = {
+    routingGroupId: props.routingGroupId,
+    paused: "Y"  // setting Y to disable the job
+  }
+
+  try {
+    const resp = await OrderRoutingService.scheduleBrokering(payload)
+    if(!hasError(resp)){
+      showToast("Job disabled")
+    }
+  } catch(err) {
+    logger.error(err)
+  }
 }
 
 async function redirect(orderRouting: Route) {
@@ -181,14 +260,16 @@ async function createOrderRoute() {
         routingGroupId: props.routingGroupId,
         statusId: "ROUTING_DRAFT",
         routingName,
-        sequenceNum: orderRoutings.value.length && orderRoutings.value[orderRoutings.value.length - 1].sequenceNum >= 0 ? orderRoutings.value[orderRoutings.value.length - 1].sequenceNum + 5 : 0,  // added check for `>= 0` as sequenceNum can be 0 which will result in again setting the new route seqNum to 0
-        description: ""
+        sequenceNum: orderRoutings.value.length && orderRoutings.value[orderRoutings.value.length - 1].sequenceNum >= 0 ? orderRoutings.value[orderRoutings.value.length - 1].sequenceNum + 5 : 0,  // added check for `>= 0` as sequenceNum can be 0 which will result in again setting the new route seqNum to 0, also considering archivedRouting when calculating new seqNum
+        description: "",
+        createdDate: DateTime.now().toMillis()
       }
 
       const orderRoutingId = await store.dispatch("orderRouting/createOrderRouting", payload)
 
-      // update the routing order for reordering
+      // update the routing order for reordering and the cloned updated routings again
       if(orderRoutingId) {
+        orderRoutings.value = JSON.parse(JSON.stringify(currentRoutingGroup.value))["routings"]
         initializeOrderRoutings();
       }
     }
@@ -206,16 +287,19 @@ function getArchivedOrderRoutings() {
 }
 
 async function updateGroupDescription() {
-  // Do not update description, if the desc is unchanged, we do not have routingGroupId, and description is leaft empty
-  if(description.value && props.routingGroupId && currentRoutingGroup.value.description !== description.value) {
-    await store.dispatch("orderRouting/updateRoutingGroup", { routingGroupId: props.routingGroupId, fieldToUpdate: 'description', value: description.value })
+  // Do not update description, if the desc is unchanged, and we do not have routingGroupId, and description is left empty
+  if(props.routingGroupId && currentRoutingGroup.value.description !== description.value) {
+    const routingGroupId = await updateRoutingGroup({ routingGroupId: props.routingGroupId, productStoreId: currentEComStore.value.productStoreId, description: description.value })
+    if(routingGroupId) {
+      await store.dispatch("orderRouting/setCurrentGroup", { ...currentRoutingGroup.value, description: description.value })
+    }
   }
   isDescUpdating.value = false
 }
 
 function findRoutingsDiff(previousSeq: any, updatedSeq: any) {
   const diffSeq: any = Object.keys(previousSeq).reduce((diff, key) => {
-    if (updatedSeq[key].orderRoutingId === previousSeq[key].orderRoutingId) return diff
+    if (updatedSeq[key].orderRoutingId === previousSeq[key].orderRoutingId && updatedSeq[key].statusId === previousSeq[key].statusId && updatedSeq[key].sequenceNum === previousSeq[key].sequenceNum) return diff
     return {
       ...diff,
       [key]: updatedSeq[key]
@@ -225,22 +309,23 @@ function findRoutingsDiff(previousSeq: any, updatedSeq: any) {
 }
 
 function doReorder(event: CustomEvent) {
-  const previousSeq = JSON.parse(JSON.stringify(initialRoutingsOrder.value))
+  const previousSeq = JSON.parse(JSON.stringify(routingsForReorder.value))
 
   // returns the updated sequence after reordering
   const updatedSeq = event.detail.complete(JSON.parse(JSON.stringify(routingsForReorder.value)));
 
   let diffSeq = findRoutingsDiff(previousSeq, updatedSeq)
-
+  
   const updatedSeqenceNum = previousSeq.map((routing: Route) => routing.sequenceNum)
   Object.keys(diffSeq).map((key: any) => {
     diffSeq[key].sequenceNum = updatedSeqenceNum[key]
   })
 
   diffSeq = Object.keys(diffSeq).map((key) => diffSeq[key])
-
   routingsForReorder.value = updatedSeq
-  routingsToUpdate.value = diffSeq
+  orderRoutings.value = sortSequence(updatedSeq.concat(getArchivedOrderRoutings()))
+  // considering that when reordering there are some changes in the order of routes
+  hasUnsavedChanges.value = true
 }
 
 async function openArchivedRoutingModal() {
@@ -248,14 +333,88 @@ async function openArchivedRoutingModal() {
     component: ArchivedRoutingModal,
     componentProps: { archivedRoutings: getArchivedOrderRoutings() }
   })
+
+  archivedRoutingModal.onDidDismiss().then((result: any) => {
+    if(result.data?.routings?.length) {
+      hasUnsavedChanges.value = true
+      orderRoutings.value = sortSequence(getActiveAndDraftOrderRoutings().concat(result.data?.routings))
+    }
+    initializeOrderRoutings()
+  })
+
   archivedRoutingModal.present();
 }
 
 async function updateOrderRouting(routing: Route, fieldToUpdate: string, value: string) {
-  const orderRoutingId = await store.dispatch("orderRouting/updateOrderRouting", { orderRoutingId: routing.orderRoutingId, fieldToUpdate, value })
-  if(orderRoutingId) {
-    initializeOrderRoutings()
+  orderRoutings.value.map((route: any) => {
+    if(route.orderRoutingId === routing.orderRoutingId) {
+      route[fieldToUpdate] = value
+    }
+  })
+  hasUnsavedChanges.value = true
+  initializeOrderRoutings()
+}
+
+async function saveRoutingGroup() {
+  // Converting the routings into object { orderRoutingId: routing } format as to find the diff after performing all the operations
+  const initialRoutings = currentRoutingGroup.value["routings"].reduce((routings: any, routing: any) => {
+    routings[routing.orderRoutingId] = routing
+    return routings
+  }, {})
+
+  const finalRoutings = orderRoutings.value.reduce((routings: any, routing: any) => {
+    routings[routing.orderRoutingId] = routing
+    return routings
+  }, {})
+
+  const diff = findRoutingsDiff(initialRoutings, finalRoutings)
+
+  // If there is no diff in the routing order then do not make any api call and update hasUnsavedChanges values as we have made its value to true on calling of doReorder function
+  if(!Object.keys(diff).length) {
+    hasUnsavedChanges.value = false
+    return;
   }
+
+  const routings = Object.values(diff).map((routing: any) => {
+    return {
+      routingGroupId: props.routingGroupId,
+      orderRoutingId: routing.orderRoutingId,
+      routingName: routing.routingName,
+      sequenceNum: routing.sequenceNum,
+      statusId: routing.statusId
+    }
+  })
+
+  const payload = {
+    routingGroupId: props.routingGroupId,
+    productStoreId: currentEComStore.value.productStoreId,
+    routings
+  }
+
+  const routingGroupId = await updateRoutingGroup(payload)
+  if(routingGroupId) {
+    hasUnsavedChanges.value = false
+    await store.dispatch("orderRouting/setCurrentGroup", { ...currentRoutingGroup.value, routings: JSON.parse(JSON.stringify(orderRoutings.value)) })
+  }
+}
+
+async function updateRoutingGroup(payload: any) {
+  let routingGroupId = ''
+  try {
+    const resp = await OrderRoutingService.updateRoutingGroup(payload);
+
+    if(!hasError(resp) && resp.data.routingGroupId) {
+      routingGroupId = resp.data.routingGroupId
+      showToast("Routing group information updated")
+    } else {
+      throw resp.data
+    }
+  } catch(err) {
+    showToast("Failed to update group information")
+    logger.error(err);
+  }
+
+  return routingGroupId
 }
 </script>
 
@@ -280,5 +439,17 @@ ion-content > div > div {
   flex-direction: column;
   justify-content: space-between;
   border-right: 1px solid #92949C;
+}
+
+.actions > ion-button {
+  margin: var(--spacer-sm);
+}
+
+@media (min-width: 991px) {
+  .actions {
+    display: flex;
+    justify-content: space-between;
+    margin: var(--spacer-base) var(--spacer-sm) var(--spacer-base);
+  }
 }
 </style>
